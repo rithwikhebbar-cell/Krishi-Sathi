@@ -1,0 +1,28 @@
+{
+  "name": "krishi-sathi-agentic-starter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bounded, evidence-grounded agricultural research agent starter",
+  "scripts": {
+    "dev": "tsx watch src/server/index.ts",
+    "start": "node dist/server/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.4",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^5.1.1"
+  }
+}
