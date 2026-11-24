@@ -41,5 +41,10 @@ export interface ModelProvider {
     request: VisionExtractionRequest
   ): Promise<string>;
 
+  synthesizeAdvisory?(
+    context: unknown,
+    signal?: AbortSignal
+  ): Promise<unknown>;
+
   getUsageMetadata?(): ModelUsageMetadata | undefined;
 }

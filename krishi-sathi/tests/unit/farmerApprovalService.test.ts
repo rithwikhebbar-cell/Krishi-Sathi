@@ -16,17 +16,17 @@ describe("FarmerApprovalService & Soil Repository Workflow (M1.3 Phase 4)", () =
 
   const validPdfBuffer = Buffer.from(
     `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n` +
-      `2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n` +
-      `3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>\nendobj\n` +
-      `4 0 obj\n<< /Length 200 >>\nstream\n` +
-      `BT\n` +
-      `(pH: 7.2) Tj\n` +
-      `(Electrical Conductivity: 0.38 dS/m) Tj\n` +
-      `(Organic Carbon: 0.52 %) Tj\n` +
-      `(Available Nitrogen: 275 kg/ha) Tj\n` +
-      `(Available Phosphorus: 19.5 kg/ha_P2O5) Tj\n` +
-      `(Available Potassium: 165 kg/ha_K2O) Tj\n` +
-      `ET\nendstream\nendobj\nxref\n0 5\ntrailer\n<< /Root 1 0 R >>\n%%EOF`
+    `2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n` +
+    `3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>\nendobj\n` +
+    `4 0 obj\n<< /Length 200 >>\nstream\n` +
+    `BT\n` +
+    `(pH: 7.2) Tj\n` +
+    `(Electrical Conductivity: 0.38 dS/m) Tj\n` +
+    `(Organic Carbon: 0.52 %) Tj\n` +
+    `(Available Nitrogen: 275 kg/ha) Tj\n` +
+    `(Available Phosphorus: 19.5 kg/ha_P2O5) Tj\n` +
+    `(Available Potassium: 165 kg/ha_K2O) Tj\n` +
+    `ET\nendstream\nendobj\nxref\n0 5\ntrailer\n<< /Root 1 0 R >>\n%%EOF`
   );
 
   it("enforces that unapproved reports do NOT modify the field's active soil profile", async () => {

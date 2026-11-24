@@ -3,6 +3,7 @@ import { SoilRepository } from "../../agentic/soil/soilRepository";
 import { FileValidator } from "../../agentic/soil/fileValidator";
 import { SoilReportExtractor } from "../../agentic/soil/soilReportExtractor";
 import { FarmerApprovalService } from "../../agentic/soil/farmerApprovalService";
+import { AgriculturalIntelligenceService } from "../../agentic/soil/agriculturalIntelligenceService";
 import { SoilNutrientEngine } from "../../agentic/engines/soilNutrientEngine";
 import {
   CreateFieldProfileInputSchema,
@@ -22,6 +23,7 @@ export const soilRouter = Router();
 const repository = SoilRepository.getInstance();
 const approvalService = new FarmerApprovalService();
 const nutrientEngine = new SoilNutrientEngine();
+const intelligenceService = new AgriculturalIntelligenceService();
 
 // Helper to authenticate / extract farmer identity from headers or query
 function getFarmerId(req: Request): string {
@@ -384,3 +386,159 @@ soilRouter.post("/fields/:id/recommendations/nutrient", async (req: Request, res
     return res.status(500).json({ error: "INTERNAL_ERROR", message });
   }
 });
+
+// ============================================================================
+// 5. Agricultural Intelligence & Advisory Endpoints (M1.3 Phase 5)
+// ============================================================================
+
+soilRouter.post("/fields/:id/advisory", async (req: Request, res: Response) => {
+  try {
+    const fieldId = getParamId(req);
+    const farmerId = getFarmerId(req);
+
+    const input = {
+      ...req.body,
+      fieldId,
+    };
+
+    const advisory = await intelligenceService.generateAdvisory(input, farmerId);
+    return res.status(201).json(advisory);
+  } catch (err: unknown) {
+    if (err instanceof NotFoundError) {
+      return res.status(404).json({ error: "NOT_FOUND", message: err.message });
+    }
+    if (err instanceof UnauthorizedError) {
+      return res.status(403).json({ error: "UNAUTHORIZED", message: err.message });
+    }
+    if (err instanceof ValidationError) {
+      return res.status(400).json({ error: "VALIDATION_ERROR", message: err.message });
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message });
+  }
+});
+
+soilRouter.get("/fields/:id/advisory/history", async (req: Request, res: Response) => {
+  try {
+    const fieldId = getParamId(req);
+    const farmerId = getFarmerId(req);
+
+    const field = await repository.getFieldOrThrow(fieldId);
+    if (field.farmerId !== farmerId && farmerId !== "system-admin") {
+      return res.status(403).json({ error: "UNAUTHORIZED", message: "You do not own this field." });
+    }
+
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const offset = req.query.offset ? Number(req.query.offset) : undefined;
+
+    const advisories = await repository.listAdvisoriesByField(fieldId, { limit, offset });
+    return res.json({ fieldId, count: advisories.length, offset: offset || 0, advisories });
+  } catch (err: unknown) {
+    if (err instanceof NotFoundError) {
+      return res.status(404).json({ error: "NOT_FOUND", message: err.message });
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message });
+  }
+});
+
+soilRouter.get("/fields/:id/advisories", async (req: Request, res: Response) => {
+  try {
+    const fieldId = getParamId(req);
+    const farmerId = getFarmerId(req);
+
+    const field = await repository.getFieldOrThrow(fieldId);
+    if (field.farmerId !== farmerId && farmerId !== "system-admin") {
+      return res.status(403).json({ error: "UNAUTHORIZED", message: "You do not own this field." });
+    }
+
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const offset = req.query.offset ? Number(req.query.offset) : undefined;
+
+    const advisories = await repository.listAdvisoriesByField(fieldId, { limit, offset });
+    return res.json({ fieldId, count: advisories.length, offset: offset || 0, advisories });
+  } catch (err: unknown) {
+    if (err instanceof NotFoundError) {
+      return res.status(404).json({ error: "NOT_FOUND", message: err.message });
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message });
+  }
+});
+
+soilRouter.get("/fields/:id/advisory/:advisoryId", async (req: Request, res: Response) => {
+  try {
+    const fieldId = getParamId(req);
+    const advisoryId = getParamId(req, "advisoryId");
+    const farmerId = getFarmerId(req);
+
+    const field = await repository.getFieldOrThrow(fieldId);
+    if (field.farmerId !== farmerId && farmerId !== "system-admin") {
+      return res.status(403).json({ error: "UNAUTHORIZED", message: "You do not own this field." });
+    }
+
+    const advisory = await repository.getAdvisory(advisoryId);
+    if (!advisory || advisory.fieldId !== fieldId) {
+      return res.status(404).json({ error: "NOT_FOUND", message: `Advisory '${advisoryId}' was not found for field '${fieldId}'.` });
+    }
+
+    return res.json(advisory);
+  } catch (err: unknown) {
+    if (err instanceof NotFoundError) {
+      return res.status(404).json({ error: "NOT_FOUND", message: err.message });
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message });
+  }
+});
+
+soilRouter.post("/fields/:id/advisory/:advisoryId/refresh", async (req: Request, res: Response) => {
+  try {
+    const fieldId = getParamId(req);
+    const advisoryId = getParamId(req, "advisoryId");
+    const farmerId = getFarmerId(req);
+
+    const field = await repository.getFieldOrThrow(fieldId);
+    if (field.farmerId !== farmerId && farmerId !== "system-admin") {
+      return res.status(403).json({ error: "UNAUTHORIZED", message: "You do not own this field." });
+    }
+
+    const existing = await repository.getAdvisory(advisoryId);
+    if (!existing || existing.fieldId !== fieldId) {
+      return res.status(404).json({ error: "NOT_FOUND", message: `Advisory '${advisoryId}' was not found for field '${fieldId}'.` });
+    }
+
+    // Re-generate advisory with latest context
+    const input = {
+      fieldId,
+      cropName: existing.cropName,
+      cropVariety: existing.cropVariety,
+      targetYieldQuintalsPerHa: existing.targetYieldQuintalsPerHa,
+      croppingSeason: existing.croppingSeason,
+      ...req.body,
+    };
+
+    const refreshed = await intelligenceService.generateAdvisory(input, farmerId);
+    refreshed.version = existing.version + 1;
+    await repository.saveAdvisory(refreshed);
+
+    return res.json({
+      message: `Advisory successfully refreshed to version ${refreshed.version}.`,
+      previousAdvisoryId: existing.id,
+      advisory: refreshed,
+    });
+  } catch (err: unknown) {
+    if (err instanceof NotFoundError) {
+      return res.status(404).json({ error: "NOT_FOUND", message: err.message });
+    }
+    if (err instanceof UnauthorizedError) {
+      return res.status(403).json({ error: "UNAUTHORIZED", message: err.message });
+    }
+    if (err instanceof ValidationError) {
+      return res.status(400).json({ error: "VALIDATION_ERROR", message: err.message });
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message });
+  }
+});
+

@@ -16,11 +16,13 @@ export interface MockProviderOptions {
   planOverride?: ResearchPlan | ((task: ResearchTask) => ResearchPlan);
   reportOverride?: ResearchReport | ((task: ResearchTask, evidence: Evidence[]) => ResearchReport);
   visionOverride?: string | ((request: import("./types").VisionExtractionRequest) => string);
+  advisoryOverride?: unknown | ((context: unknown) => unknown);
   planDelayMs?: number;
   synthesizeDelayMs?: number;
   failOnPlan?: boolean;
   failOnSynthesize?: boolean;
   failOnVision?: boolean;
+  failOnAdvisory?: boolean;
   returnMalformedPlan?: boolean;
   returnMalformedReport?: boolean;
 }
@@ -259,6 +261,24 @@ export class MockModelProvider implements ModelProvider {
         availableZincPpm: { value: 0.52, unit: "ppm", testMethod: "DTPA_TEA_CaCl2_LINDSAY_NORVELL", confidence: 0.89 },
       },
     });
+  }
+
+  async synthesizeAdvisory(context: unknown, signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted) {
+      throw new CancellationError("MockProvider.synthesizeAdvisory");
+    }
+
+    if (this.options.failOnAdvisory) {
+      throw new ProviderError("mock", "Simulated model advisory synthesis failure");
+    }
+
+    if (this.options.advisoryOverride) {
+      return typeof this.options.advisoryOverride === "function"
+        ? (this.options.advisoryOverride as Function)(context)
+        : this.options.advisoryOverride;
+    }
+
+    return null;
   }
 
   getUsageMetadata(): ModelUsageMetadata | undefined {

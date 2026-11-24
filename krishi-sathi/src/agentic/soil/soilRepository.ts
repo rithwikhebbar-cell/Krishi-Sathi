@@ -9,6 +9,7 @@ import {
   HistoricalSoilTestRecordSchema,
 } from "../contracts/soil/fieldTypes";
 import { SoilReportExtraction, SoilReportExtractionSchema } from "../contracts/soil/extractionTypes";
+import { AgriculturalAdvisory, AgriculturalAdvisorySchema } from "../contracts/soil/advisoryTypes";
 import { ValidationError, NotFoundError, UnauthorizedError, DatabaseError } from "../contracts/errors";
 import { SupabaseClient } from "./supabaseClient";
 
@@ -43,6 +44,10 @@ export interface ISoilRepository {
     corrections?: Record<string, unknown>
   ): Promise<void>;
 
+  saveAdvisory(advisory: AgriculturalAdvisory): Promise<void>;
+  getAdvisory(advisoryId: string): Promise<AgriculturalAdvisory | undefined>;
+  listAdvisoriesByField(fieldId: string, options?: PaginationOptions): Promise<AgriculturalAdvisory[]>;
+
   clear(): Promise<void> | void;
 }
 
@@ -55,12 +60,14 @@ export class InMemorySoilRepository implements ISoilRepository {
   private readonly reports = new Map<string, SoilReportExtraction>();
   private readonly history = new Map<string, HistoricalSoilTestRecord[]>();
   private readonly edits = new Map<string, Array<Record<string, unknown>>>();
+  private readonly advisories = new Map<string, AgriculturalAdvisory>();
 
   public clear(): void {
     this.fields.clear();
     this.reports.clear();
     this.history.clear();
     this.edits.clear();
+    this.advisories.clear();
   }
 
   public async createField(input: CreateFieldProfileInput): Promise<FieldProfile> {
@@ -210,6 +217,23 @@ export class InMemorySoilRepository implements ISoilRepository {
     field.updatedAt = new Date().toISOString();
 
     this.fields.set(fieldId, field);
+  }
+
+  public async saveAdvisory(advisory: AgriculturalAdvisory): Promise<void> {
+    this.advisories.set(advisory.id, advisory);
+  }
+
+  public async getAdvisory(advisoryId: string): Promise<AgriculturalAdvisory | undefined> {
+    return this.advisories.get(advisoryId);
+  }
+
+  public async listAdvisoriesByField(fieldId: string, options?: PaginationOptions): Promise<AgriculturalAdvisory[]> {
+    const list = Array.from(this.advisories.values())
+      .filter((a) => a.fieldId === fieldId)
+      .sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime());
+    const offset = options?.offset || 0;
+    const limit = options?.limit || list.length;
+    return list.slice(offset, offset + limit);
   }
 }
 
@@ -432,6 +456,62 @@ export class SupabaseSoilRepository implements ISoilRepository {
     });
   }
 
+  public async saveAdvisory(advisory: AgriculturalAdvisory): Promise<void> {
+    const existing = await this.getAdvisory(advisory.id);
+    const row = {
+      id: advisory.id,
+      field_id: advisory.fieldId,
+      farmer_id: advisory.farmerId,
+      soil_test_record_id: advisory.soilTestRecordId,
+      crop_name: advisory.cropName,
+      crop_variety: advisory.cropVariety || null,
+      target_yield: advisory.targetYieldQuintalsPerHa,
+      cropping_season: advisory.croppingSeason,
+      deterministic_calculation: advisory.deterministicCalculation,
+      crop_water_assessment: advisory.cropWaterAssessment || null,
+      weather_context: advisory.weatherSummary || null,
+      advisory_content: {
+        fieldOverview: advisory.fieldOverview,
+        soilHealth: advisory.soilHealth,
+        nutrientManagement: advisory.nutrientManagement,
+        waterManagement: advisory.waterManagement,
+        actionPlan: advisory.actionPlan,
+        evidenceAndLimitations: advisory.evidenceAndLimitations,
+      },
+      confidence_assessment: advisory.confidence,
+      model_metadata: { model: advisory.modelVersion },
+      version: advisory.version,
+      created_at: advisory.generatedAt,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (existing) {
+      await this.client.update("agricultural_advisories", { id: `eq.${advisory.id}` }, row);
+    } else {
+      await this.client.insert("agricultural_advisories", row);
+    }
+  }
+
+  public async getAdvisory(advisoryId: string): Promise<AgriculturalAdvisory | undefined> {
+    const row = await this.client.selectOne<Record<string, unknown>>("agricultural_advisories", {
+      id: `eq.${advisoryId}`,
+    });
+    if (!row) return undefined;
+    return this.mapAdvisoryRowToAdvisory(row);
+  }
+
+  public async listAdvisoriesByField(fieldId: string, options?: PaginationOptions): Promise<AgriculturalAdvisory[]> {
+    const queryParams: Record<string, string | number> = {
+      field_id: `eq.${fieldId}`,
+      order: "created_at.desc",
+    };
+    if (options?.limit !== undefined) queryParams["limit"] = options.limit;
+    if (options?.offset !== undefined) queryParams["offset"] = options.offset;
+
+    const rows = await this.client.select<Record<string, unknown>>("agricultural_advisories", queryParams);
+    return rows.map((r) => this.mapAdvisoryRowToAdvisory(r));
+  }
+
   // --- Row Mappers with Zod Validation ---
 
   private mapFieldRowToProfile(row: Record<string, unknown>): FieldProfile {
@@ -491,6 +571,36 @@ export class SupabaseSoilRepository implements ISoilRepository {
       isImmutable: true,
     };
     return HistoricalSoilTestRecordSchema.parse(candidate);
+  }
+
+  private mapAdvisoryRowToAdvisory(row: Record<string, unknown>): AgriculturalAdvisory {
+    const content = (row.advisory_content || {}) as Record<string, unknown>;
+    const modelMeta = (row.model_metadata || {}) as Record<string, unknown>;
+
+    const candidate: AgriculturalAdvisory = {
+      id: String(row.id),
+      fieldId: String(row.field_id),
+      farmerId: String(row.farmer_id),
+      soilTestRecordId: String(row.soil_test_record_id),
+      cropName: String(row.crop_name),
+      cropVariety: row.crop_variety ? String(row.crop_variety) : undefined,
+      targetYieldQuintalsPerHa: Number(row.target_yield),
+      croppingSeason: String(row.cropping_season || "RABI"),
+      fieldOverview: content.fieldOverview as AgriculturalAdvisory["fieldOverview"],
+      soilHealth: content.soilHealth as AgriculturalAdvisory["soilHealth"],
+      nutrientManagement: content.nutrientManagement as AgriculturalAdvisory["nutrientManagement"],
+      waterManagement: content.waterManagement as AgriculturalAdvisory["waterManagement"],
+      actionPlan: content.actionPlan as AgriculturalAdvisory["actionPlan"],
+      evidenceAndLimitations: content.evidenceAndLimitations as AgriculturalAdvisory["evidenceAndLimitations"],
+      confidence: row.confidence_assessment as AgriculturalAdvisory["confidence"],
+      deterministicCalculation: row.deterministic_calculation as AgriculturalAdvisory["deterministicCalculation"],
+      cropWaterAssessment: row.crop_water_assessment ? (row.crop_water_assessment as AgriculturalAdvisory["cropWaterAssessment"]) : undefined,
+      weatherSummary: row.weather_context ? String(row.weather_context) : undefined,
+      generatedAt: String(row.created_at),
+      modelVersion: String(modelMeta.model || "gemini-1.5-flash"),
+      version: Number(row.version || 1),
+    };
+    return AgriculturalAdvisorySchema.parse(candidate);
   }
 }
 
@@ -580,6 +690,18 @@ export class SoilRepository implements ISoilRepository {
     corrections?: Record<string, unknown>
   ): Promise<void> {
     return SoilRepository.getInstance().activateApprovedProfile(fieldId, approvedProfile, historyRecord, corrections);
+  }
+
+  public saveAdvisory(advisory: AgriculturalAdvisory): Promise<void> {
+    return SoilRepository.getInstance().saveAdvisory(advisory);
+  }
+
+  public getAdvisory(advisoryId: string): Promise<AgriculturalAdvisory | undefined> {
+    return SoilRepository.getInstance().getAdvisory(advisoryId);
+  }
+
+  public listAdvisoriesByField(fieldId: string, options?: PaginationOptions): Promise<AgriculturalAdvisory[]> {
+    return SoilRepository.getInstance().listAdvisoriesByField(fieldId, options);
   }
 
   public clear(): Promise<void> | void {
